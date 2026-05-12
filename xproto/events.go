@@ -54,6 +54,64 @@ type KeyPressEvent struct {
 
 func (KeyPressEvent) x11event() {}
 
+// ButtonPressEvent, ButtonReleaseEvent, and MotionNotifyEvent share the same
+// 32-byte wire layout as KeyPressEvent — Detail carries the button code (1
+// = left, 2 = middle, 3 = right, 4/5 = scroll) for buttons, or a hint flag
+// for motion (only meaningful with PointerMotionHint mask).
+type ButtonPressEvent struct {
+	Sequence   uint16
+	Detail     uint8
+	Time       uint32
+	Root       uint32
+	Event      uint32
+	Child      uint32
+	RootX      int16
+	RootY      int16
+	EventX     int16
+	EventY     int16
+	State      uint16
+	SameScreen bool
+	SendEvent  bool
+}
+
+func (ButtonPressEvent) x11event() {}
+
+type ButtonReleaseEvent struct {
+	Sequence   uint16
+	Detail     uint8
+	Time       uint32
+	Root       uint32
+	Event      uint32
+	Child      uint32
+	RootX      int16
+	RootY      int16
+	EventX     int16
+	EventY     int16
+	State      uint16
+	SameScreen bool
+	SendEvent  bool
+}
+
+func (ButtonReleaseEvent) x11event() {}
+
+type MotionNotifyEvent struct {
+	Sequence   uint16
+	Detail     uint8
+	Time       uint32
+	Root       uint32
+	Event      uint32
+	Child      uint32
+	RootX      int16
+	RootY      int16
+	EventX     int16
+	EventY     int16
+	State      uint16
+	SameScreen bool
+	SendEvent  bool
+}
+
+func (MotionNotifyEvent) x11event() {}
+
 type ExposeEvent struct {
 	Sequence uint16
 	Window   uint32
@@ -164,6 +222,54 @@ func decodeEvent(b []byte, bo binary.ByteOrder) Event {
 	case EvKeyRelease:
 		// dmenu doesn't act on releases; drop them so they don't double-fire.
 		return nil
+	case EvButtonPress:
+		return ButtonPressEvent{
+			Sequence:   bo.Uint16(b[2:4]),
+			Detail:     b[1],
+			Time:       bo.Uint32(b[4:8]),
+			Root:       bo.Uint32(b[8:12]),
+			Event:      bo.Uint32(b[12:16]),
+			Child:      bo.Uint32(b[16:20]),
+			RootX:      int16(bo.Uint16(b[20:22])),
+			RootY:      int16(bo.Uint16(b[22:24])),
+			EventX:     int16(bo.Uint16(b[24:26])),
+			EventY:     int16(bo.Uint16(b[26:28])),
+			State:      bo.Uint16(b[28:30]),
+			SameScreen: b[30] != 0,
+			SendEvent:  sendEvent,
+		}
+	case EvButtonRelease:
+		return ButtonReleaseEvent{
+			Sequence:   bo.Uint16(b[2:4]),
+			Detail:     b[1],
+			Time:       bo.Uint32(b[4:8]),
+			Root:       bo.Uint32(b[8:12]),
+			Event:      bo.Uint32(b[12:16]),
+			Child:      bo.Uint32(b[16:20]),
+			RootX:      int16(bo.Uint16(b[20:22])),
+			RootY:      int16(bo.Uint16(b[22:24])),
+			EventX:     int16(bo.Uint16(b[24:26])),
+			EventY:     int16(bo.Uint16(b[26:28])),
+			State:      bo.Uint16(b[28:30]),
+			SameScreen: b[30] != 0,
+			SendEvent:  sendEvent,
+		}
+	case EvMotionNotify:
+		return MotionNotifyEvent{
+			Sequence:   bo.Uint16(b[2:4]),
+			Detail:     b[1],
+			Time:       bo.Uint32(b[4:8]),
+			Root:       bo.Uint32(b[8:12]),
+			Event:      bo.Uint32(b[12:16]),
+			Child:      bo.Uint32(b[16:20]),
+			RootX:      int16(bo.Uint16(b[20:22])),
+			RootY:      int16(bo.Uint16(b[22:24])),
+			EventX:     int16(bo.Uint16(b[24:26])),
+			EventY:     int16(bo.Uint16(b[26:28])),
+			State:      bo.Uint16(b[28:30]),
+			SameScreen: b[30] != 0,
+			SendEvent:  sendEvent,
+		}
 	case EvExpose:
 		return ExposeEvent{
 			Sequence: bo.Uint16(b[2:4]),

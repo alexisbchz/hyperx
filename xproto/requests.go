@@ -7,16 +7,27 @@ import (
 
 // Window/event masks.
 const (
-	EventMaskKeyPress         = 1 << 0
-	EventMaskKeyRelease       = 1 << 1
-	EventMaskButtonPress      = 1 << 2
-	EventMaskButtonRelease    = 1 << 3
-	EventMaskExposure         = 1 << 15
-	EventMaskVisibility       = 1 << 16
-	EventMaskStructureNotify  = 1 << 17
+	EventMaskKeyPress           = 1 << 0
+	EventMaskKeyRelease         = 1 << 1
+	EventMaskButtonPress        = 1 << 2
+	EventMaskButtonRelease      = 1 << 3
+	EventMaskEnterWindow        = 1 << 4
+	EventMaskLeaveWindow        = 1 << 5
+	EventMaskPointerMotion      = 1 << 6
+	EventMaskPointerMotionHint  = 1 << 7
+	EventMaskButton1Motion      = 1 << 8
+	EventMaskButton2Motion      = 1 << 9
+	EventMaskButton3Motion      = 1 << 10
+	EventMaskButton4Motion      = 1 << 11
+	EventMaskButton5Motion      = 1 << 12
+	EventMaskButtonMotion       = 1 << 13
+	EventMaskKeymapState        = 1 << 14
+	EventMaskExposure           = 1 << 15
+	EventMaskVisibility         = 1 << 16
+	EventMaskStructureNotify    = 1 << 17
 	EventMaskSubstructureNotify = 1 << 19
-	EventMaskFocusChange      = 1 << 21
-	EventMaskPropertyChange   = 1 << 22
+	EventMaskFocusChange        = 1 << 21
+	EventMaskPropertyChange     = 1 << 22
 )
 
 // CW (CreateWindow value mask) bits.
@@ -28,7 +39,8 @@ const (
 	CWColormap         = 1 << 13
 )
 
-// GC value mask bits.
+// GC value mask bits. Order matters — when emitting a value list to the wire,
+// values must appear in ascending bit order.
 const (
 	GCFunction          = 1 << 0
 	GCPlaneMask         = 1 << 1
@@ -39,7 +51,62 @@ const (
 	GCCapStyle          = 1 << 6
 	GCJoinStyle         = 1 << 7
 	GCFillStyle         = 1 << 8
+	GCFillRule          = 1 << 9
+	GCTile              = 1 << 10
+	GCStipple           = 1 << 11
+	GCTileStippleXOrig  = 1 << 12
+	GCTileStippleYOrig  = 1 << 13
+	GCFont              = 1 << 14
+	GCSubwindowMode     = 1 << 15
 	GCGraphicsExposures = 1 << 16
+	GCClipXOrigin       = 1 << 17
+	GCClipYOrigin       = 1 << 18
+	GCClipMask          = 1 << 19
+	GCDashOffset        = 1 << 20
+	GCDashList          = 1 << 21
+	GCArcMode           = 1 << 22
+)
+
+// GC function ops.
+const (
+	GXclear        = 0
+	GXand          = 1
+	GXandReverse   = 2
+	GXcopy         = 3
+	GXandInverted  = 4
+	GXnoop         = 5
+	GXxor          = 6
+	GXor           = 7
+	GXnor          = 8
+	GXequiv        = 9
+	GXinvert       = 10
+	GXorReverse    = 11
+	GXcopyInverted = 12
+	GXorInverted   = 13
+	GXnand         = 14
+	GXset          = 15
+)
+
+// Subwindow mode (GCSubwindowMode value).
+const (
+	ClipByChildren   = 0
+	IncludeInferiors = 1
+)
+
+// GetImage format.
+const (
+	ImageFormatBitmap   = 0
+	ImageFormatXYPixmap = 1
+	ImageFormatZPixmap  = 2
+)
+
+// GrabPointer / GrabKeyboard status codes.
+const (
+	GrabSuccess        = 0
+	GrabAlreadyGrabbed = 1
+	GrabInvalidTime    = 2
+	GrabNotViewable    = 3
+	GrabFrozen         = 4
 )
 
 // PropMode for ChangeProperty.
@@ -727,5 +794,151 @@ func (c *Conn) AllocColor(cmap uint32, r, g, b uint16) (*ColorReply, error) {
 		G:     c.bo.Uint16(rep[10:12]),
 		B:     c.bo.Uint16(rep[12:14]),
 		Pixel: c.bo.Uint32(rep[16:20]),
+	}, nil
+}
+
+// ----------------------------------------------------------------------------
+// TranslateCoordinates (opcode 40)
+// ----------------------------------------------------------------------------
+
+type TranslateReply struct {
+	SameScreen bool
+	Child      uint32
+	DstX, DstY int16
+}
+
+func (c *Conn) TranslateCoordinates(src, dst uint32, srcX, srcY int16) (*TranslateReply, error) {
+	r := newReq(40, 0)
+	r.u32(c.bo, src)
+	r.u32(c.bo, dst)
+	r.u16(c.bo, uint16(srcX))
+	r.u16(c.bo, uint16(srcY))
+	rep, err := c.SendReply(r.finish(c.bo))
+	if err != nil {
+		return nil, err
+	}
+	return &TranslateReply{
+		SameScreen: rep[1] != 0,
+		Child:      c.bo.Uint32(rep[8:12]),
+		DstX:       int16(c.bo.Uint16(rep[12:14])),
+		DstY:       int16(c.bo.Uint16(rep[14:16])),
+	}, nil
+}
+
+// ----------------------------------------------------------------------------
+// GrabPointer (26), UngrabPointer (27)
+// ----------------------------------------------------------------------------
+
+type GrabPointerReq struct {
+	OwnerEvents       bool
+	GrabWindow        uint32
+	EventMask         uint16
+	PointerMode       uint8 // GrabModeSync / GrabModeAsync
+	KeyboardMode      uint8
+	ConfineTo, Cursor uint32 // 0 for None
+	Time              uint32 // CurrentTime = 0
+}
+
+func (c *Conn) GrabPointer(req GrabPointerReq) (uint8, error) {
+	r := newReq(26, btoi(req.OwnerEvents))
+	r.u32(c.bo, req.GrabWindow)
+	r.u16(c.bo, req.EventMask)
+	r.u8(req.PointerMode)
+	r.u8(req.KeyboardMode)
+	r.u32(c.bo, req.ConfineTo)
+	r.u32(c.bo, req.Cursor)
+	r.u32(c.bo, req.Time)
+	rep, err := c.SendReply(r.finish(c.bo))
+	if err != nil {
+		return 0, err
+	}
+	return rep[1], nil
+}
+
+func (c *Conn) UngrabPointer(time uint32) {
+	r := newReq(27, 0)
+	r.u32(c.bo, time)
+	c.Send(r.finish(c.bo))
+}
+
+// ----------------------------------------------------------------------------
+// OpenFont (45), CloseFont (46), CreateGlyphCursor (94), FreeCursor (95)
+// ----------------------------------------------------------------------------
+
+// OpenFont loads a server font by name (e.g. "cursor" for the standard glyph
+// cursor font). The resulting fid can be passed to CreateGlyphCursor.
+func (c *Conn) OpenFont(fid uint32, name string) {
+	r := newReq(45, 0)
+	r.u32(c.bo, fid)
+	r.u16(c.bo, uint16(len(name)))
+	r.u16(c.bo, 0)
+	r.bytes([]byte(name))
+	r.pad(len(name))
+	c.Send(r.finish(c.bo))
+}
+
+func (c *Conn) CloseFont(fid uint32) {
+	r := newReq(46, 0)
+	r.u32(c.bo, fid)
+	c.Send(r.finish(c.bo))
+}
+
+// CreateGlyphCursor builds a cursor from a glyph in a font (commonly the
+// "cursor" font; standard cursor glyphs are at even-numbered character codes
+// in the X cursor-font convention — see <X11/cursorfont.h>, e.g. XC_crosshair=30).
+func (c *Conn) CreateGlyphCursor(cid, sourceFont, maskFont uint32, sourceChar, maskChar uint16, fr, fg, fb, br, bg, bb uint16) {
+	r := newReq(94, 0)
+	r.u32(c.bo, cid)
+	r.u32(c.bo, sourceFont)
+	r.u32(c.bo, maskFont)
+	r.u16(c.bo, sourceChar)
+	r.u16(c.bo, maskChar)
+	r.u16(c.bo, fr)
+	r.u16(c.bo, fg)
+	r.u16(c.bo, fb)
+	r.u16(c.bo, br)
+	r.u16(c.bo, bg)
+	r.u16(c.bo, bb)
+	c.Send(r.finish(c.bo))
+}
+
+func (c *Conn) FreeCursor(cid uint32) {
+	r := newReq(95, 0)
+	r.u32(c.bo, cid)
+	c.Send(r.finish(c.bo))
+}
+
+// ----------------------------------------------------------------------------
+// GetImage (opcode 73)
+// ----------------------------------------------------------------------------
+
+type GetImageReply struct {
+	Depth  uint8
+	Visual uint32
+	Data   []byte
+}
+
+func (c *Conn) GetImage(format uint8, drawable uint32, x, y int16, width, height uint16, planeMask uint32) (*GetImageReply, error) {
+	r := newReq(73, format)
+	r.u32(c.bo, drawable)
+	r.u16(c.bo, uint16(x))
+	r.u16(c.bo, uint16(y))
+	r.u16(c.bo, width)
+	r.u16(c.bo, height)
+	r.u32(c.bo, planeMask)
+	rep, err := c.SendReply(r.finish(c.bo))
+	if err != nil {
+		return nil, err
+	}
+	extraWords := c.bo.Uint32(rep[4:8])
+	dataLen := int(extraWords) * 4
+	data := make([]byte, dataLen)
+	if dataLen > 0 {
+		copy(data, rep[32:32+dataLen])
+	}
+	return &GetImageReply{
+		Depth:  rep[1],
+		Visual: c.bo.Uint32(rep[8:12]),
+		Data:   data,
 	}, nil
 }
